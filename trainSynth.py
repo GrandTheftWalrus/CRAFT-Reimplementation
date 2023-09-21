@@ -10,6 +10,11 @@ from craft import CRAFT
 from loss.mseloss import Maploss
 from torch.autograd import Variable
 
+# TODO:
+# 1) find out if the data I'm training on is properly formatted and processed
+# 2) fix the resizing/cropping thing that's causing the images with a batch to be
+#   non-uniform in dimension (which is why I have batch size set to 0 which is slow)
+
 
 def adjust_learning_rate(optimizer, gamma, step, lr):
     """Sets the learning rate to the initial LR decayed by 10 at every
@@ -17,51 +22,57 @@ def adjust_learning_rate(optimizer, gamma, step, lr):
     # Adapted from PyTorch Imagenet example:
     # https://github.com/pytorch/examples/blob/master/imagenet/main.py
     """
-    lr = lr * (gamma ** step)
+    lr = lr * (gamma**step)
     print(lr)
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return param_group['lr']
-
+        param_group["lr"] = lr
+    return param_group["lr"]
 
 
 if __name__ == "__main__":
-    synthData_dir = {"synthtext":"/data/CRAFT-Reimplementation/dataset/SynthText"}
+    synthData_dir = {"synthtext": "data/GroundTruth"}
     target_size = 768
-    batch_size = 16
-    num_workers = 8
+    batch_size = 4
+    num_workers = 1  # THIS USED TO BE 6, JUST DEBUGGING RN CUH
     lr = 1e-4
     training_lr = 1e-4
     weight_decay = 5e-4
     gamma = 0.8
     whole_training_step = 100000
 
-
     synthDataLoader = SynthTextDataLoader(target_size, synthData_dir)
-    train_loader = torch.utils.data.DataLoader(synthDataLoader,
-                                               batch_size=batch_size,
-                                               shuffle=True,
-                                               num_workers=num_workers,
-                                               drop_last=True,
-                                               pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(
+        synthDataLoader,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=False,
+        pin_memory=True,
+    )
 
-    craft = CRAFT()
+    craft = (
+        CRAFT()
+    )  # note: might need to use the pretrain=True parameter here, or whatever its called
     craft = torch.nn.DataParallel(craft).cuda()
-    craft.load_state_dict(torch.load("/data/CRAFT-Reimplementation/dataset/weights_7000.pth"))
+    craft.load_state_dict(torch.load("result/craft_mlt_25k.pth"))
     optimizer = optim.Adam(craft.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = Maploss()
 
     update_lr_rate_step = 2
 
-    train_step = 40000
+    train_step = 0
     loss_value = 0
     batch_time = 0
     while train_step < whole_training_step:
-        for index, (image, region_image, affinity_image, confidence_mask, confidences) in enumerate(train_loader):
+        for index, (image, region_image, affinity_image, confidence_mask) in enumerate(
+            train_loader
+        ):
             start_time = time.time()
             craft.train()
-            if train_step>0 and train_step%20000==0:
-                training_lr = adjust_learning_rate(optimizer, gamma, update_lr_rate_step, lr)
+            if train_step > 0 and train_step % 20000 == 0:
+                training_lr = adjust_learning_rate(
+                    optimizer, gamma, update_lr_rate_step, lr
+                )
                 update_lr_rate_step += 1
 
             images = Variable(image).cuda()
@@ -73,7 +84,13 @@ if __name__ == "__main__":
 
             out1 = output[:, :, :, 0]
             out2 = output[:, :, :, 1]
-            loss = criterion(region_image_label, affinity_image_label, out1, out2, confidence_mask_label)
+            loss = criterion(
+                region_image_label,
+                affinity_image_label,
+                out1,
+                out2,
+                confidence_mask_label,
+            )
 
             optimizer.zero_grad()
             loss.backward()
@@ -81,22 +98,41 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             end_time = time.time()
             loss_value += loss.item()
-            batch_time += (end_time - start_time)
-            if train_step > 0 and train_step%5==0:
+            batch_time += end_time - start_time
+            if train_step > 0 and train_step % 5 == 0:
                 mean_loss = loss_value / 5
                 loss_value = 0
                 display_batch_time = time.time()
-                avg_batch_time = batch_time/5
+                avg_batch_time = batch_time / 5
                 batch_time = 0
-                print("{}, training_step: {}|{}, learning rate: {:.8f}, training_loss: {:.5f}, avg_batch_time: {:.5f}".format(time.strftime('%Y-%m-%d:%H:%M:%S',time.localtime(time.time())), train_step, whole_training_step, training_lr, mean_loss, avg_batch_time))
-
+                print(
+                    "{}, training_step: {}|{}, learning rate: {:.8f}, training_loss: {:.5f}, avg_batch_time: {:.5f}".format(
+                        time.strftime("%Y-%m-%d:%H:%M:%S", time.localtime(time.time())),
+                        train_step,
+                        whole_training_step,
+                        training_lr,
+                        mean_loss,
+                        avg_batch_time,
+                    )
+                )
             train_step += 1
+            if train_step % 200 == 0 and train_step != 0:
+                print("Saving state, index:", index)
+                torch.save(
+                    craft.state_dict(), "result/CreeAFT_weights_" + repr(index) + ".pth"
+                )
+                image_np = image.numpy()[0, :, :, :].transpose(1, 2, 0) * 255
+                region_image_np = region_image.numpy().transpose(1, 2, 0) * 255
+                affinity_image_np = affinity_image.numpy().transpose(1, 2, 0) * 255
 
-            if index % 1000 == 0 and index != 0:
-                print('Saving state, index:', index)
-                torch.save(craft.state_dict(),
-                           '/data/CRAFT-Reimplementation/dataset/weights_' + repr(index) + '.pth')
+                # for le debugging
+                print(image_np.shape)
+                print(region_image_np.shape)
+                print(affinity_image_np.shape)
+                cv2.imwrite("image.jpg", image_np)
+                cv2.imwrite("region_image.jpg", region_image_np)
+                cv2.imwrite("affinity_image.jpg", affinity_image_np)
+                exit()
                 # test('/data/CRAFT-pytorch/synweights/synweights_' + repr(index) + '.pth')
-                #test('/data/CRAFT-pytorch/craft_mlt_25k.pth')
+                # test('/data/CRAFT-pytorch/craft_mlt_25k.pth')
                 # getresult()
-

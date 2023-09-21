@@ -7,8 +7,8 @@ def random_scale(img, bboxes, min_size):
     if max(h, w) > 1280:
         scale = 1280.0 / max(h, w)
         img = cv2.resize(img, dsize=None, fx=scale, fy=scale)
-        bboxes *= scale
-
+        bboxes = bboxes * scale
+    
     h, w = img.shape[0:2]
     random_scale = np.array([1.0, 1.5, 2.0])
     random_scale = [1.0, 1.5, 2.0]
@@ -16,9 +16,9 @@ def random_scale(img, bboxes, min_size):
     scale = random.sample(random_scale, 1)[0]
     if min(h, w) * scale <= min_size:
         scale = (min_size + 10) * 1.0 / min(h, w)
-    bboxes *= scale
+    bboxes = bboxes * scale
     img = cv2.resize(img, dsize=None, fx=scale, fy=scale)
-    return img
+    return img, bboxes
 
 
 def padding_image(image,imgsize):
@@ -70,12 +70,12 @@ def random_crop(imgs, img_size, character_bboxes):
     for idx in range(len(imgs)):
         # crop_h = sample_bboxes[1, 1] if th < sample_bboxes[1, 1] else th
         # crop_w = sample_bboxes[1, 0] if tw < sample_bboxes[1, 0] else tw
-
+        
         if len(imgs[idx].shape) == 3:
             imgs[idx] = imgs[idx][i:i + crop_h, j:j + crop_w, :]
         else:
             imgs[idx] = imgs[idx][i:i + crop_h, j:j + crop_w]
-
+        
         if crop_w > tw or crop_h > th:
             imgs[idx] = padding_image(imgs[idx], tw)
 

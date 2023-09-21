@@ -36,15 +36,14 @@ class Maploss(nn.Module):
         total_loss = positive_loss + negative_loss
         return total_loss
 
-    def forward(self, region_scores_label, affinity_socres_label, region_scores_pre, affinity_scores_pre, mask):
+    def forward(self, region_scores_label, affinity_scores_label, region_scores_pre, affinity_scores_pre, mask):
         loss_fn = torch.nn.MSELoss(reduce=False, size_average=False)
-
-        assert region_scores_label.size() == region_scores_pre.size() and affinity_socres_label.size() == affinity_scores_pre.size()
+        assert region_scores_label.size() == region_scores_pre.size() and affinity_scores_label.size() == affinity_scores_pre.size()
         loss1 = loss_fn(region_scores_pre, region_scores_label)
-        loss2 = loss_fn(affinity_scores_pre, affinity_socres_label)
+        loss2 = loss_fn(affinity_scores_pre, affinity_scores_label)
         loss_region = torch.mul(loss1, mask)
         loss_affinity = torch.mul(loss2, mask)
 
         char_loss = self.single_image_loss(loss_region, region_scores_label)
-        affi_loss = self.single_image_loss(loss_affinity, affinity_socres_label)
+        affi_loss = self.single_image_loss(loss_affinity, affinity_scores_label)
         return char_loss + affi_loss
